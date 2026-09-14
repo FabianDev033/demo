@@ -8,7 +8,7 @@ import org.springframework.stereotype.Service;
 import com.example.demo.client.dummyjson.DummyJsonClient;
 import com.example.demo.client.dummyjson.DummyJsonProducto;
 import com.example.demo.client.dummyjson.DummyJsonProductosResponse;
-import com.example.demo.producto.dto.ProductoDTO;
+import com.example.demo.dto.producto.ProductoDTO;
 
 @Service 
 public class ProductoService {
