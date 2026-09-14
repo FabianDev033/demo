@@ -23,3 +23,5 @@ public class OpenApiConfig {
                         .version("v1"));
     }
 }
+
+
