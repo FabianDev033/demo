@@ -1,22 +1,47 @@
-# TP1 · Spring Boot, API REST y arquitectura en capas
+# TP2 · Persistencia, migraciones y arquitectura hexagonal
 
-Punto de partida para el práctico. **No está completo a propósito**: el
-módulo de `productos` (consumo de una API externa) está resuelto de punta a
-punta como ejemplo del patrón a seguir. El módulo de `favoritos` (CRUD
-propio) no tiene nada armado — ni entidad, ni repository, ni DTOs, ni
-service, ni controller — se construye entero en clase, reusando exactamente
-el mismo patrón que ya se ve en `productos` (y la misma infraestructura
-transversal: `GlobalExceptionHandler` y las excepciones ya existen y
-alcanzan para los dos módulos).
+Punto de partida para el práctico. Sale directo de un TP1 ya resuelto
+(`productos` + `favoritos`, ambos completos) — **la infraestructura de
+PostgreSQL/JPA/Flyway ya está armada, pero la lógica de persistencia todavía
+no se tocó**: `favoritos` sigue exactamente igual que en el TP1, guardado en
+memoria.
 
-> ⚠️ **Sin persistencia real.** Cuando se arme el repository de favoritos,
-> va a guardar todo en memoria (un `Map`, sin base de datos). Los datos se
-> pierden cada vez que se reinicia la aplicación. Eso es intencional — la
-> persistencia con JPA se aborda en el TP2, no acá.
+> ⚠️ **Favoritos sigue en memoria.** `InMemoryFavoritoRepository` no se tocó.
+> Reemplazarlo por un adapter JPA — sin modificar `FavoritoService` ni
+> `FavoritoController` — es el corazón de este práctico.
+
+La consigna completa (con el porqué de cada paso) y la presentación
+**"TP2: persistencia y arquitectura hexagonal"** están publicadas en el sitio
+de la materia, sección *Trabajos prácticos → TP2*.
 
 ## Cómo levantar el proyecto
 
-Requiere Java 25. Usar siempre el wrapper, nunca un `mvn` instalado aparte:
+Requiere Java 25. Usar siempre el wrapper, nunca un `mvn` instalado aparte.
+
+### 1. Base de datos
+
+**Opción A — Docker (recomendada):**
+
+```
+docker compose up -d
+```
+
+Levanta PostgreSQL con la base `webii_tp2` y el usuario `webii_tp2` (ver
+`docker-compose.yml`), en el puerto `5432`.
+
+**Opción B — PostgreSQL local:** si no podés usar Docker, instalá
+PostgreSQL localmente y creá la base y el rol a mano (por ejemplo desde
+pgAdmin, Query Tool sobre la base `postgres`):
+
+```sql
+CREATE ROLE webii_tp2 WITH LOGIN PASSWORD 'webii_tp2' SUPERUSER;
+CREATE DATABASE webii_tp2 OWNER webii_tp2;
+```
+
+Los datos de conexión están en `application.properties`
+(`spring.datasource.*`) — si usás otro usuario/base, ajustalos ahí.
+
+### 2. Levantar la app
 
 ```
 # Windows
@@ -26,8 +51,10 @@ Requiere Java 25. Usar siempre el wrapper, nunca un `mvn` instalado aparte:
 ./mvnw spring-boot:run
 ```
 
-Cuando el log muestre `Started DemoApplication`, la app queda escuchando en
-`http://localhost:8080`.
+Con la base arriba, la app debería levantar sin errores — pero **todavía no
+hay ninguna migración de Flyway**, así que no se crea ninguna tabla propia
+todavía (eso es la consigna 2). Cuando el log muestre `Started
+DemoApplication`, la app queda escuchando en `http://localhost:8080`.
 
 Para compilar y correr los tests: `./mvnw test` (o `.\mvnw.cmd test`).
 
@@ -36,129 +63,93 @@ Para compilar y correr los tests: `./mvnw test` (o `.\mvnw.cmd test`).
 | Método | Path | Qué hace |
 |---|---|---|
 | GET | `/health` | Chequeo de salud básico |
-| GET | `/ping` | Devuelve `pong`, sin JSON — otro chequeo trivial |
-| GET | `/api/productos?limit=&skip=` | Lista paginada del catálogo (consume DummyJSON) |
+| GET | `/ping` | Devuelve `pong`, sin JSON |
+| GET | `/api/productos?limit=&skip=` | Catálogo, de solo lectura (consume DummyJSON) |
 | GET | `/api/productos/{id}` | Un producto puntual. 404 si no existe |
+| GET / POST | `/api/favoritos` | Listar / crear favoritos — **en memoria, TP1** |
+| GET / PUT / DELETE | `/api/favoritos/{id}` | Obtener, actualizar o eliminar un favorito — **en memoria, TP1** |
 
 Documentación interactiva (Swagger UI):
 **http://localhost:8080/swagger-ui/index.html**
 (el JSON crudo de OpenAPI está en `/v3/api-docs`).
 
-### Probarlo a mano
-
-```
-curl "http://localhost:8080/api/productos?limit=2"
-curl "http://localhost:8080/api/productos/1"
-curl -i "http://localhost:8080/api/productos/999999"   # -> 404 con detalle
-```
-
-El caso de error (`404`) responde con un `ProblemDetail` uniforme, por
-ejemplo:
-
-```json
-{
-  "status": 404,
-  "title": "Not Found",
-  "detail": "No existe el producto con id 999999",
-  "instance": "/api/productos/999999"
-}
-```
-
 ## Estructura del proyecto
-
-Organizado **por capa técnica** (no por feature): todo lo que es
-"controller" vive junto, todo lo que es "service" vive junto, etc. Así se ve
-de un vistazo qué capa le falta a cada recurso.
 
 ```
 com.example.demo
 ├── controller/            → @RestController (HTTP in/out, nada de lógica)
-│   ├── HealthController
-│   ├── PingController
 │   ├── ProductoController
-│   └── FavoritoController         ⬜ para armar en clase
+│   ├── FavoritoController
+│   └── ListaController            ⬜ para armar en clase
 ├── service/               → interfaz + implementación, lógica de negocio
-│   ├── ProductoService            (interfaz)
-│   ├── ProductoServiceImpl        (mapea DummyJSON -> ProductoDTO)
-│   ├── FavoritoService            ⬜ para armar en clase (interfaz)
-│   └── FavoritoServiceImpl        ⬜ para armar en clase
-├── repository/            → interfaz + implementación, acceso a datos
-│   ├── FavoritoRepository          ⬜ para armar en clase (interfaz)
-│   └── InMemoryFavoritoRepository  ⬜ para armar en clase (Map en memoria, sin JPA)
-├── domain/                → entidades de dominio (no son DTOs)
-│   └── Favorito                   ⬜ para armar en clase
+│   ├── ProductoService / ProductoServiceImpl
+│   ├── FavoritoService / FavoritoServiceImpl
+│   └── ListaService / ListaServiceImpl    ⬜ para armar en clase
+├── repository/            → puertos + adapters
+│   ├── FavoritoRepository          (puerto — no debería cambiar de forma)
+│   ├── InMemoryFavoritoRepository  → se REEMPLAZA por un adapter JPA ⬜
+│   ├── ListaRepository             ⬜ para armar en clase (puerto)
+│   ├── FavoritoJpaRepository / FavoritoRepositoryAdapter  ⬜ para armar en clase
+│   └── ListaJpaRepository / ListaRepositoryAdapter        ⬜ para armar en clase
+├── entity/                ⬜ no existe todavía — @Entity de JPA (FavoritoEntity, ListaEntity)
+├── domain/                → entidades de dominio (records, inmutables)
+│   ├── Favorito                   (le va a faltar sumar listaId)
+│   └── Lista                      ⬜ para armar en clase
 ├── dto/
-│   ├── producto/          → contrato propio de la API (ProductoDTO, ProductoPageResponse)
-│   └── favorito/          ⬜ para armar en clase (FavoritoRequest, FavoritoResponse)
-├── client/
-│   └── dummyjson/         → todo lo que sabe hablar con la API externa
-│       ├── DummyJsonProducto           (forma del JSON externo)
-│       ├── DummyJsonProductosResponse
-│       └── DummyJsonClient             (llamadas HTTP con RestClient)
-├── exception/             → manejo uniforme de errores (ya sirve para los dos módulos)
-│   ├── RecursoNoEncontradoException  (404)
-│   ├── ServicioExternoException      (5xx, falla al consumir DummyJSON)
-│   └── GlobalExceptionHandler        (@RestControllerAdvice)
+│   ├── producto/          → ProductoDTO, ProductoPageResponse
+│   ├── favorito/          → FavoritoRequest, FavoritoResponse (les va a faltar listaId)
+│   └── lista/              ⬜ para armar en clase
+├── client/dummyjson/      → todo lo que sabe hablar con la API externa
+├── exception/             → manejo uniforme de errores
+│   ├── RecursoNoEncontradoException  (404, ya existe)
+│   ├── ServicioExternoException      (5xx, ya existe)
+│   ├── ListaNoVaciaException         ⬜ para armar en clase (409)
+│   └── GlobalExceptionHandler        (@RestControllerAdvice, ya existe)
 └── config/
-    ├── RestClientConfig   → bean de RestClient para DummyJSON
-    └── OpenApiConfig      → metadata general de Swagger
+    ├── RestClientConfig
+    └── OpenApiConfig
 ```
 
-Las líneas marcadas ⬜ todavía no existen en el repo — son las que se crean
-en clase.
+Las líneas marcadas ⬜ todavía no existen en el repo.
 
-La regla clave del módulo de productos: **nadie fuera de `client.dummyjson`
-conoce los nombres de campo de DummyJSON** (`title`, `thumbnail`, etc.). El
-resto de la app siempre trabaja con `ProductoDTO`, que tiene sus propios
-nombres (`nombre`, `imagenUrl`, ...).
+## Migraciones (Flyway)
 
-## Para hacer en clase: favoritos
+`src/main/resources/db/migration/` **todavía no existe** — la primera
+consigna del práctico es crearla, con `V1__create_favoritos.sql`. A partir de
+ahí, cada cambio de esquema es una migración nueva (`V2`, `V3`...), nunca
+editando una ya aplicada.
 
-No hay nada armado de este módulo — se construye entero, capa por capa,
-siguiendo el mismo patrón que ya está resuelto en `productos`. Lo único que
-ya existe y sirve para los dos módulos es `GlobalExceptionHandler` y las
-excepciones (`RecursoNoEncontradoException`, `ServicioExternoException`).
+## Qué queda por hacer
 
-1. **Dominio** en `domain/`: `Favorito` (record), por ejemplo con
-   `id`, `productoId` (referencia al producto externo — no se duplican sus
-   datos), `nota` (comentario personal) y `fechaAgregado`.
-2. **Repository** en `repository/`: `FavoritoRepository` (interfaz con
-   `findAll`, `findById`, `save`, `deleteById`, `existsById`) +
-   `InMemoryFavoritoRepository` (un `Map` en memoria, sin JPA — mismo
-   patrón que se explicó para el catálogo, pero acá es la fuente de datos
-   real del recurso, no un caché).
-3. **DTOs** en `dto/favorito/`:
-   - `FavoritoRequest` (lo que manda el cliente al crear/actualizar): al
-     menos `productoId` y `nota`, con Bean Validation (`@NotNull`, etc.).
-   - `FavoritoResponse` (lo que devuelve la API): `id`, `productoId`,
-     `nota`, `fechaAgregado`.
-4. **Service** en `service/`: `FavoritoService` (interfaz) +
-   `FavoritoServiceImpl`, con el CRUD completo y el mapeo
-   entidad ↔ DTO. Cuando no se encuentra un favorito, lanzar
-   `RecursoNoEncontradoException` — ya existe y ya está manejada por
-   `GlobalExceptionHandler`, no hace falta crear una excepción nueva.
-5. **Controller** en `controller/`: `FavoritoController` sobre
-   `/api/favoritos`, con `@Tag(name = "favoritos")` y un `@Operation` por
-   endpoint:
-
-   | Operación | Método | Código de éxito |
-   |---|---|---|
-   | Crear | `POST /api/favoritos` | `201 Created` |
-   | Listar | `GET /api/favoritos` | `200 OK` |
-   | Obtener uno | `GET /api/favoritos/{id}` | `200 OK` |
-   | Actualizar | `PUT /api/favoritos/{id}` | `200 OK` |
-   | Eliminar | `DELETE /api/favoritos/{id}` | `204 No Content` |
-
-6. **Validación**: anotar `FavoritoRequest` con Bean Validation y agregar
-   `@Valid` en el parámetro del controller. La respuesta de error (`400`)
-   con el detalle de campos ya la arma `GlobalExceptionHandler` — no hay
-   que escribir nada nuevo ahí tampoco.
-
-Con eso, Swagger UI va a mostrar los dos grupos de endpoints
-(`productos` y `favoritos`) documentados.
+1. **Migraciones iniciales** — `V1__create_favoritos.sql` (tabla `favoritos`).
+2. **Favoritos sobre JPA** — `FavoritoEntity`, `FavoritoJpaRepository`,
+   `FavoritoRepositoryAdapter` (implementa el puerto `FavoritoRepository` que
+   ya existe). Eliminar `InMemoryFavoritoRepository`. Ni `FavoritoService` ni
+   `FavoritoController` deberían cambiar.
+3. **Documentar** qué cambió y qué no al migrar de memoria a JPA.
+4. **Listas** — dominio `Lista`, puerto `ListaRepository`, `ListaEntity`,
+   adapter, service, controller (`/api/listas`, con el endpoint de favoritos
+   de una lista). Relación `@ManyToOne` en `FavoritoEntity` hacia
+   `ListaEntity`, sin `@OneToMany` bidireccional — resolver el lado inverso
+   con una consulta derivada. Migraciones `V2` (listas) y `V3` (`lista_id` en
+   favoritos, nullable).
+5. **Evolución del esquema** — `V4`: backfill de una lista por defecto para
+   los favoritos existentes, y recién ahí `lista_id NOT NULL`.
+6. **Transacción** — `POST /api/listas/{origenId}/mover-favoritos`, con
+   `@Transactional` en el Service.
+7. **Manejo de errores** — borrar una lista con favoritos debe responder
+   `409 Conflict`, no `500`.
+8. **Documentación** — Swagger con los tres grupos de endpoints, y el
+   `README` actualizado con las dos justificaciones que pide la consigna.
 
 ## Dependencias
 
-- `spring-boot-starter-webmvc` — Spring MVC + Tomcat embebido.
-- `spring-boot-starter-validation` — Bean Validation (`@NotNull`, `@NotBlank`, ...).
-- `springdoc-openapi-starter-webmvc-ui` — genera el OpenAPI y sirve Swagger UI.
+Ya agregadas al `pom.xml`, listas para usar:
+
+- `spring-boot-starter-webmvc`, `spring-boot-starter-validation`,
+  `springdoc-openapi-starter-webmvc-ui` — del TP1.
+- `spring-boot-starter-data-jpa` — Spring Data JPA + Hibernate.
+- `postgresql` — driver JDBC (scope `runtime`).
+- `spring-boot-starter-flyway` + `flyway-database-postgresql` — migraciones.
+  **Ojo:** en Spring Boot 4.x, `flyway-core` solo **no alcanza** — la
+  autoconfiguración de Flyway se movió a este starter separado.
