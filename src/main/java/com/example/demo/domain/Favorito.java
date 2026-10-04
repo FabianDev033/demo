@@ -11,6 +11,7 @@ import java.time.LocalDateTime;
 public record Favorito(
         Long id,
         Long productoId,
+        Long listaId,
         String nota,
         LocalDateTime fechaAgregado
 ) {

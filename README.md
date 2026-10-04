@@ -1,155 +1,103 @@
 # TP2 · Persistencia, migraciones y arquitectura hexagonal
 
-Punto de partida para el práctico. Sale directo de un TP1 ya resuelto
-(`productos` + `favoritos`, ambos completos) — **la infraestructura de
-PostgreSQL/JPA/Flyway ya está armada, pero la lógica de persistencia todavía
-no se tocó**: `favoritos` sigue exactamente igual que en el TP1, guardado en
-memoria.
+Evolución del proyecto del TP1. El catálogo de productos sigue siendo de solo lectura y consume DummyJSON. Los favoritos ahora se guardan en PostgreSQL mediante Spring Data JPA; las listas permiten organizarlos y cada favorito pertenece a una lista.
 
-> ⚠️ **Favoritos sigue en memoria.** `InMemoryFavoritoRepository` no se tocó.
-> Reemplazarlo por un adapter JPA — sin modificar `FavoritoService` ni
-> `FavoritoController` — es el corazón de este práctico.
-
-La consigna completa (con el porqué de cada paso) y la presentación
-**"TP2: persistencia y arquitectura hexagonal"** están publicadas en el sitio
-de la materia, sección *Trabajos prácticos → TP2*.
+La persistencia usa puertos y adapters para separar el dominio de la infraestructura. Flyway versiona el esquema y Hibernate valida que coincida con las entidades.
 
 ## Cómo levantar el proyecto
 
-Requiere Java 25. Usar siempre el wrapper, nunca un `mvn` instalado aparte.
+Requiere Java 25. Usá el Maven Wrapper incluido en el repositorio.
 
-### 1. Base de datos
+### PostgreSQL con Docker
 
-**Opción A — Docker (recomendada):**
+Desde la raíz del proyecto:
 
-```
+~~~powershell
 docker compose up -d
-```
+docker compose ps
+~~~
 
-Levanta PostgreSQL con la base `webii_tp2` y el usuario `webii_tp2` (ver
-`docker-compose.yml`), en el puerto `5432`.
+El servicio PostgreSQL usa la imagen oficial y expone el puerto 5432. La base, el usuario y la contraseña son `webii_tp2`; están definidos en `docker-compose.yml`. La aplicación usa esos mismos datos en `src/main/resources/application.properties`.
 
-**Opción B — PostgreSQL local:** si no podés usar Docker, instalá
-PostgreSQL localmente y creá la base y el rol a mano (por ejemplo desde
-pgAdmin, Query Tool sobre la base `postgres`):
+### PostgreSQL local
 
-```sql
-CREATE ROLE webii_tp2 WITH LOGIN PASSWORD 'webii_tp2' SUPERUSER;
+Si no usás Docker, creá el rol y la base en PostgreSQL:
+
+~~~sql
+CREATE ROLE webii_tp2 WITH LOGIN PASSWORD 'webii_tp2';
 CREATE DATABASE webii_tp2 OWNER webii_tp2;
-```
+~~~
 
-Los datos de conexión están en `application.properties`
-(`spring.datasource.*`) — si usás otro usuario/base, ajustalos ahí.
+Si usás otras credenciales o puerto, actualizá las propiedades `spring.datasource.*` en `src/main/resources/application.properties`.
 
-### 2. Levantar la app
+### Iniciar la aplicación
 
-```
-# Windows
+~~~powershell
 .\mvnw.cmd spring-boot:run
+~~~
 
-# macOS/Linux
+En macOS o Linux:
+
+~~~sh
 ./mvnw spring-boot:run
-```
+~~~
 
-Con la base arriba, la app debería levantar sin errores — pero **todavía no
-hay ninguna migración de Flyway**, así que no se crea ninguna tabla propia
-todavía (eso es la consigna 2). Cuando el log muestre `Started
-DemoApplication`, la app queda escuchando en `http://localhost:8080`.
+Al iniciar, Flyway aplica las migraciones pendientes de `src/main/resources/db/migration/`. Hibernate valida el esquema con `spring.jpa.hibernate.ddl-auto=validate`; no lo crea ni lo modifica.
 
-Para compilar y correr los tests: `./mvnw test` (o `.\mvnw.cmd test`).
+Para revisar las migraciones aplicadas:
 
-## Endpoints disponibles hoy
+~~~powershell
+docker compose exec postgres psql -U webii_tp2 -d webii_tp2 -c "SELECT version, description, success FROM flyway_schema_history ORDER BY installed_rank;"
+~~~
 
-| Método | Path | Qué hace |
+Swagger UI está disponible en [http://localhost:8080/swagger-ui/index.html](http://localhost:8080/swagger-ui/index.html); OpenAPI JSON en `/v3/api-docs`.
+
+## Endpoints
+
+| Método | Ruta | Resultado |
 |---|---|---|
-| GET | `/health` | Chequeo de salud básico |
-| GET | `/ping` | Devuelve `pong`, sin JSON |
-| GET | `/api/productos?limit=&skip=` | Catálogo, de solo lectura (consume DummyJSON) |
-| GET | `/api/productos/{id}` | Un producto puntual. 404 si no existe |
-| GET / POST | `/api/favoritos` | Listar / crear favoritos — **en memoria, TP1** |
-| GET / PUT / DELETE | `/api/favoritos/{id}` | Obtener, actualizar o eliminar un favorito — **en memoria, TP1** |
+| GET | `/health` | Chequeo de salud |
+| GET | `/ping` | Devuelve `pong` |
+| GET | `/api/productos?limit=&skip=` | Catálogo de solo lectura desde DummyJSON |
+| GET | `/api/productos/{id}` | Obtener un producto |
+| GET / POST | `/api/favoritos` | Listar o crear favoritos |
+| GET / PUT / DELETE | `/api/favoritos/{id}` | Obtener, actualizar o eliminar un favorito |
+| POST | `/api/listas` | Crear una lista; responde 201 |
+| GET | `/api/listas` | Listar listas |
+| GET | `/api/listas/{id}` | Obtener una lista |
+| GET | `/api/listas/{id}/favoritos` | Listar los favoritos de una lista |
+| DELETE | `/api/listas/{id}` | Eliminar una lista vacía; responde 204, o 409 si tiene favoritos |
+| POST | `/api/listas/{origenId}/mover-favoritos` | Mover los favoritos al destino y eliminar el origen; responde 204 |
 
-Documentación interactiva (Swagger UI):
-**http://localhost:8080/swagger-ui/index.html**
-(el JSON crudo de OpenAPI está en `/v3/api-docs`).
+Los endpoints responden 404 cuando el recurso solicitado no existe. Crear o actualizar un favorito requiere `productoId`, `listaId` y `nota`. Crear una lista requiere `nombre`.
 
-## Estructura del proyecto
+## Persistencia y arquitectura: cambios respecto del TP1
 
-```
-com.example.demo
-├── controller/            → @RestController (HTTP in/out, nada de lógica)
-│   ├── ProductoController
-│   ├── FavoritoController
-│   └── ListaController            ⬜ para armar en clase
-├── service/               → interfaz + implementación, lógica de negocio
-│   ├── ProductoService / ProductoServiceImpl
-│   ├── FavoritoService / FavoritoServiceImpl
-│   └── ListaService / ListaServiceImpl    ⬜ para armar en clase
-├── repository/            → puertos + adapters
-│   ├── FavoritoRepository          (puerto — no debería cambiar de forma)
-│   ├── InMemoryFavoritoRepository  → se REEMPLAZA por un adapter JPA ⬜
-│   ├── ListaRepository             ⬜ para armar en clase (puerto)
-│   ├── FavoritoJpaRepository / FavoritoRepositoryAdapter  ⬜ para armar en clase
-│   └── ListaJpaRepository / ListaRepositoryAdapter        ⬜ para armar en clase
-├── entity/                ⬜ no existe todavía — @Entity de JPA (FavoritoEntity, ListaEntity)
-├── domain/                → entidades de dominio (records, inmutables)
-│   ├── Favorito                   (le va a faltar sumar listaId)
-│   └── Lista                      ⬜ para armar en clase
-├── dto/
-│   ├── producto/          → ProductoDTO, ProductoPageResponse
-│   ├── favorito/          → FavoritoRequest, FavoritoResponse (les va a faltar listaId)
-│   └── lista/              ⬜ para armar en clase
-├── client/dummyjson/      → todo lo que sabe hablar con la API externa
-├── exception/             → manejo uniforme de errores
-│   ├── RecursoNoEncontradoException  (404, ya existe)
-│   ├── ServicioExternoException      (5xx, ya existe)
-│   ├── ListaNoVaciaException         ⬜ para armar en clase (409)
-│   └── GlobalExceptionHandler        (@RestControllerAdvice, ya existe)
-└── config/
-    ├── RestClientConfig
-    └── OpenApiConfig
-```
+En el TP1, `InMemoryFavoritoRepository` implementaba el puerto `FavoritoRepository` y guardaba los favoritos en memoria. En este TP se eliminó esa implementación y se agregaron:
 
-Las líneas marcadas ⬜ todavía no existen en el repo.
+- `FavoritoEntity`: entidad JPA que representa la tabla `favoritos`.
+- `FavoritoJpaRepository`: interfaz Spring Data JPA.
+- `FavoritoRepositoryAdapter`: convierte entre la entidad JPA y el dominio, y delega las operaciones al repositorio JPA.
 
-## Migraciones (Flyway)
+`FavoritoRepository` es el puerto: define el contrato que necesita el Service. El adapter es la implementación concreta de ese contrato. Durante el reemplazo de memoria por JPA, el Service y el Controller pudieron seguir usando el mismo puerto sin conocer el cambio de almacenamiento.
 
-`src/main/resources/db/migration/` **todavía no existe** — la primera
-consigna del práctico es crearla, con `V1__create_favoritos.sql`. A partir de
-ahí, cada cambio de esquema es una migración nueva (`V2`, `V3`...), nunca
-editando una ya aplicada.
+Al agregar Listas se amplió la funcionalidad: el dominio `Favorito` y los DTOs `FavoritoRequest` y `FavoritoResponse` ahora incluyen `listaId`; el Service valida la lista y el puerto de Favoritos ofrece una consulta por lista. El Controller de Favoritos conserva sus rutas. La entidad `FavoritoEntity` tiene una relación `@ManyToOne` con `ListaEntity` mediante `lista_id`. No hay una colección `@OneToMany` inversa; los favoritos se consultan por `listaId`.
 
-## Qué queda por hacer
+Listas tiene su propio dominio, puerto, entidad, repositorio JPA, adapter, Service y Controller. Esto permite mantener las reglas de negocio en los Services y el acceso concreto a PostgreSQL detrás de los puertos.
 
-1. **Migraciones iniciales** — `V1__create_favoritos.sql` (tabla `favoritos`).
-2. **Favoritos sobre JPA** — `FavoritoEntity`, `FavoritoJpaRepository`,
-   `FavoritoRepositoryAdapter` (implementa el puerto `FavoritoRepository` que
-   ya existe). Eliminar `InMemoryFavoritoRepository`. Ni `FavoritoService` ni
-   `FavoritoController` deberían cambiar.
-3. **Documentar** qué cambió y qué no al migrar de memoria a JPA.
-4. **Listas** — dominio `Lista`, puerto `ListaRepository`, `ListaEntity`,
-   adapter, service, controller (`/api/listas`, con el endpoint de favoritos
-   de una lista). Relación `@ManyToOne` en `FavoritoEntity` hacia
-   `ListaEntity`, sin `@OneToMany` bidireccional — resolver el lado inverso
-   con una consulta derivada. Migraciones `V2` (listas) y `V3` (`lista_id` en
-   favoritos, nullable).
-5. **Evolución del esquema** — `V4`: backfill de una lista por defecto para
-   los favoritos existentes, y recién ahí `lista_id NOT NULL`.
-6. **Transacción** — `POST /api/listas/{origenId}/mover-favoritos`, con
-   `@Transactional` en el Service.
-7. **Manejo de errores** — borrar una lista con favoritos debe responder
-   `409 Conflict`, no `500`.
-8. **Documentación** — Swagger con los tres grupos de endpoints, y el
-   `README` actualizado con las dos justificaciones que pide la consigna.
+## Migraciones y evolución del esquema
 
-## Dependencias
+Las migraciones están en `src/main/resources/db/migration/`:
 
-Ya agregadas al `pom.xml`, listas para usar:
+- `V1__create_favorito.sql`: crea `favoritos`. El nombre quedó en singular y Flyway ya la aplicó; no debe renombrarse ni editarse en una base que ya la registró.
+- `V2__create_listas.sql`: crea `listas`.
+- `V3__add_lista_id_a_favoritos.sql`: agrega la referencia nullable desde favoritos a listas.
+- `V4__lista_id_obligatorio.sql`: crea la lista `Sin clasificar` si falta, asigna allí los favoritos que tenían `lista_id` nulo y recién entonces hace obligatoria la columna.
 
-- `spring-boot-starter-webmvc`, `spring-boot-starter-validation`,
-  `springdoc-openapi-starter-webmvc-ui` — del TP1.
-- `spring-boot-starter-data-jpa` — Spring Data JPA + Hibernate.
-- `postgresql` — driver JDBC (scope `runtime`).
-- `spring-boot-starter-flyway` + `flyway-database-postgresql` — migraciones.
-  **Ojo:** en Spring Boot 4.x, `flyway-core` solo **no alcanza** — la
-  autoconfiguración de Flyway se movió a este starter separado.
+Las migraciones aplicadas se mantienen inmutables. Flyway registra su versión y checksum; cambiar un archivo ya aplicado hace que el historial deje de coincidir con su contenido. Para evolucionar el esquema se agrega una migración con una versión nueva. V4 conserva los datos existentes mediante el backfill antes de aplicar la restricción `NOT NULL`.
+
+## Operación transaccional y atomicidad
+
+`ListaServiceImpl.moverFavoritos` está anotado con `@Transactional`. La operación valida que existan las listas de origen y destino, reasigna los favoritos y elimina la lista de origen dentro de una única transacción.
+
+Esto aplica la atomicidad de ACID: todos los cambios se confirman juntos o se revierten juntos. Sin `@Transactional`, cada guardado podría confirmarse por separado; si una escritura posterior o el borrado de la lista fallara, algunos favoritos podrían quedar en destino mientras otros siguieran en origen y la lista fuente permaneciera.

@@ -6,6 +6,7 @@ import com.example.demo.dto.favorito.FavoritoResponse;
 import com.example.demo.exception.RecursoNoEncontradoException;
 import com.example.demo.repository.FavoritoRepository;
 import org.springframework.stereotype.Service;
+import com.example.demo.repository.ListaRepository;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -19,9 +20,11 @@ import java.util.List;
 public class FavoritoServiceImpl implements FavoritoService {
 
     private final FavoritoRepository repository;
+    private final ListaRepository listaRepository;
 
-    public FavoritoServiceImpl(FavoritoRepository repository) {
+    public FavoritoServiceImpl(FavoritoRepository repository, ListaRepository listaRepository) {
         this.repository = repository;
+        this.listaRepository = listaRepository;
     }
 
     @Override
@@ -38,16 +41,19 @@ public class FavoritoServiceImpl implements FavoritoService {
 
     @Override
     public FavoritoResponse crear(FavoritoRequest request) {
-        Favorito nuevo = new Favorito(null, request.productoId(), request.nota(), LocalDateTime.now());
+        validarLista(request.listaId());
+        Favorito nuevo = new Favorito(null, request.productoId(), request.listaId(), request.nota(), LocalDateTime.now());
         return aResponse(repository.save(nuevo));
     }
 
     @Override
     public FavoritoResponse actualizar(Long id, FavoritoRequest request) {
+        validarLista(request.listaId());
         Favorito existente = buscarOFallar(id);
         Favorito actualizado = new Favorito(
                 existente.id(),
                 request.productoId(),
+                request.listaId(),
                 request.nota(),
                 existente.fechaAgregado()   // no se pisa la fecha original al actualizar
         );
@@ -66,6 +72,12 @@ public class FavoritoServiceImpl implements FavoritoService {
     }
 
     private FavoritoResponse aResponse(Favorito favorito) {
-        return new FavoritoResponse(favorito.id(), favorito.productoId(), favorito.nota(), favorito.fechaAgregado());
+        return new FavoritoResponse(favorito.id(), favorito.productoId(), favorito.listaId(), favorito.nota(), favorito.fechaAgregado());
+    }
+
+    private void validarLista(Long listaId) {
+        if (!listaRepository.existsById(listaId)) {
+            throw new RecursoNoEncontradoException("No existe la lista con id " + listaId);
+        };
     }
 }

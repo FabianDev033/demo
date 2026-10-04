@@ -12,6 +12,9 @@ public record FavoritoRequest(
         @NotNull(message = "productoId es obligatorio")
         Long productoId,
 
+        @NotNull(message = "listaId es obligatorio")
+        Long listaId,
+
         @NotBlank(message = "nota no puede estar vacía")
         String nota
 ) {
