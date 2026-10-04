@@ -1,48 +1,20 @@
 package com.example.demo.repository;
 
-import java.util.ArrayList;
+import com.example.demo.domain.Favorito;
+
 import java.util.List;
 import java.util.Optional;
 
-import org.springframework.stereotype.Repository;
-
-import com.example.demo.model.Favorito;
-
-@Repository 
-public class FavoritoRepository {
-    private final List<Favorito> favoritos = new ArrayList<>();
-    private Long siguienteId = 1l;
-
-    public List<Favorito> findAll() {
-        return new ArrayList<>(favoritos);
-    }
-
-    public Optional<Favorito> findById(Long id) {
-        for (Favorito favorito : favoritos) {
-            if(favorito.getId().equals(id)) {
-                return Optional.of(favorito);
-            }
-        }
-        return Optional.empty();
-    }
-
-    public Favorito save(Favorito favorito) {
-        if (favorito.getId() == null){
-            favorito.setId(siguienteId);
-            siguienteId++;
-            favoritos.add(favorito);
-        }else{
-            for(int i = 0; i<favoritos.size(); i++){
-                if(favoritos.get(i).getId().equals(favorito.getId())){
-                    favoritos.set(i,favorito);
-                    break;
-                }
-            }
-        }
-        return favorito;
-    }
-
-    public void deleteById(Long id) {
-        favoritos.removeIf(favorito -> favorito.getId().equals(id));
-    }
+/**
+ * Contrato de acceso a datos para favoritos. El service depende de esta
+ * interfaz, no de la implementación concreta — hoy es en memoria, pero
+ * podría cambiarse por una basada en JPA (TP2) sin tocar el service.
+ */
+public interface FavoritoRepository {
+    List<Favorito> findAll();
+    Optional<Favorito> findById(Long id);
+    Favorito save(Favorito favorito);
+    void deleteById(Long id);
+    boolean existsById(Long id);
+    List<Favorito> findByListaId(Long listaId);
 }

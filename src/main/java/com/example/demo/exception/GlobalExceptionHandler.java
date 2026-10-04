@@ -1,5 +1,7 @@
 package com.example.demo.exception;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.validation.FieldError;
@@ -23,6 +25,8 @@ import java.util.Map;
  */
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
     @ExceptionHandler(RecursoNoEncontradoException.class)
     public ProblemDetail handleNoEncontrado(RecursoNoEncontradoException ex) {
@@ -51,9 +55,20 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     public ProblemDetail handleGenerico(Exception ex) {
+        // Este es el único caso donde SÍ logueamos la excepción completa: es
+        // un error no anticipado, y sin esto el detalle real se pierde
+        // (el cliente solo debe ver un mensaje genérico, nunca un stack trace).
+        log.error("Error inesperado no manejado", ex);
         ProblemDetail problema = ProblemDetail.forStatusAndDetail(
                 HttpStatus.INTERNAL_SERVER_ERROR, "Ocurrió un error inesperado");
         problema.setTitle("Error interno");
+        return problema;
+    }
+
+    @ExceptionHandler(ListaNoVaciaException.class)
+    public ProblemDetail handleListaNoVacia(ListaNoVaciaException ex) {
+        ProblemDetail problema = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
+        problema.setTitle("La lista no está vacía");
         return problema;
     }
 }
