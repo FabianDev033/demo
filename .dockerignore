@@ -1,0 +1,7 @@
+.git
+.github
+.vscode
+target
+evidencia
+docs-utils
+*.log
