@@ -8,6 +8,9 @@ import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import com.example.demo.security.CredencialesInvalidasException;
+import com.example.demo.security.EmailEnUsoException;
+import com.example.demo.security.RecursoNoAutorizadoException;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -32,6 +35,15 @@ public class GlobalExceptionHandler {
     public ProblemDetail handleNoEncontrado(RecursoNoEncontradoException ex) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, ex.getMessage());
     }
+
+    @ExceptionHandler(EmailEnUsoException.class)
+    public ProblemDetail handleEmailEnUso(EmailEnUsoException ex) { return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage()); }
+
+    @ExceptionHandler(CredencialesInvalidasException.class)
+    public ProblemDetail handleCredenciales(CredencialesInvalidasException ex) { return ProblemDetail.forStatusAndDetail(HttpStatus.UNAUTHORIZED, ex.getMessage()); }
+
+    @ExceptionHandler(RecursoNoAutorizadoException.class)
+    public ProblemDetail handleNoAutorizado(RecursoNoAutorizadoException ex) { return ProblemDetail.forStatusAndDetail(HttpStatus.FORBIDDEN, ex.getMessage()); }
 
     @ExceptionHandler(ServicioExternoException.class)
     public ProblemDetail handleServicioExterno(ServicioExternoException ex) {

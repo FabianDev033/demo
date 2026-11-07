@@ -5,6 +5,7 @@ import com.example.demo.dto.favorito.FavoritoResponse;
 import com.example.demo.service.FavoritoService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -27,7 +28,8 @@ import java.util.List;
  */
 @RestController
 @RequestMapping("/api/favoritos")
-@Tag(name = "favoritos", description = "Favoritos del usuario sobre el catálogo de productos (CRUD en memoria)")
+@Tag(name = "favoritos", description = "Favoritos del usuario")
+@SecurityRequirement(name = "bearerAuth")
 public class FavoritoController {
 
     private final FavoritoService service;

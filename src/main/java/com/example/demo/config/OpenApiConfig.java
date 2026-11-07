@@ -1,26 +1,3 @@
 package com.example.demo.config;
-
-import io.swagger.v3.oas.models.OpenAPI;
-import io.swagger.v3.oas.models.info.Info;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
-
-/**
- * Metadata general que aparece en Swagger UI (título, descripción, versión).
- * La documentación de cada endpoint puntual va con @Operation en el
- * controller correspondiente.
- */
-@Configuration
-public class OpenApiConfig {
-
-    @Bean
-    public OpenAPI demoOpenAPI() {
-        return new OpenAPI()
-                .info(new Info()
-                        .title("TP2 · Catálogo, Favoritos y Listas")
-                        .description("Catálogo de productos externo y gestión persistente de favoritos y listas.")
-                        .version("v2"));
-    }
-}
-
-
+import io.swagger.v3.oas.models.OpenAPI; import io.swagger.v3.oas.models.Components; import io.swagger.v3.oas.models.info.Info; import io.swagger.v3.oas.models.security.SecurityScheme; import org.springframework.context.annotation.Bean; import org.springframework.context.annotation.Configuration;
+@Configuration public class OpenApiConfig { @Bean public OpenAPI demoOpenAPI(){return new OpenAPI().info(new Info().title("TP3 · Catálogo, Favoritos y Listas").description("API protegida con JWT").version("v3")).components(new Components().addSecuritySchemes("bearerAuth",new SecurityScheme().type(SecurityScheme.Type.HTTP).scheme("bearer").bearerFormat("JWT")));} }

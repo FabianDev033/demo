@@ -6,6 +6,7 @@ import com.example.demo.dto.lista.ListaResponse;
 import com.example.demo.service.ListaService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import jakarta.validation.Valid;
 
 import org.springframework.http.ResponseEntity;
@@ -25,6 +26,7 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/listas")
 @Tag(name = "listas", description = "Listas para organizar favoritos")
+@SecurityRequirement(name = "bearerAuth")
 public class ListaController {
 
     private final ListaService service;

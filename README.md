@@ -1,103 +1,79 @@
-# TP2 · Persistencia, migraciones y arquitectura hexagonal
+# TP3 · Seguridad, persistencia y autorización
 
-Evolución del proyecto del TP1. El catálogo de productos sigue siendo de solo lectura y consume DummyJSON. Los favoritos ahora se guardan en PostgreSQL mediante Spring Data JPA; las listas permiten organizarlos y cada favorito pertenece a una lista.
+API Spring Boot 4.1.1 y Java 25 para catálogo de productos, favoritos y listas. La persistencia usa PostgreSQL y Flyway. Spring Security protege las operaciones de listas y favoritos mediante JWT stateless; el catálogo, la salud, Swagger y autenticación son públicos.
 
-La persistencia usa puertos y adapters para separar el dominio de la infraestructura. Flyway versiona el esquema y Hibernate valida que coincida con las entidades.
+## Requisitos y ejecución
 
-## Cómo levantar el proyecto
+Se necesita Java 25. Para pruebas de integración se necesita Docker con el daemon disponible. Maven se ejecuta con el wrapper incluido:
 
-Requiere Java 25. Usá el Maven Wrapper incluido en el repositorio.
+```powershell
+.\mvnw.cmd clean verify
+.\mvnw.cmd test
+```
 
-### PostgreSQL con Docker
+`test` ejecuta pruebas unitarias (`*Test`). `verify` agrega las pruebas de integración `*IT` con PostgreSQL Testcontainers y aplica todas las migraciones Flyway en una base efímera, sin depender de una base local.
 
-Desde la raíz del proyecto:
+Para levantar PostgreSQL local:
 
-~~~powershell
+```powershell
 docker compose up -d
-docker compose ps
-~~~
+```
 
-El servicio PostgreSQL usa la imagen oficial y expone el puerto 5432. La base, el usuario y la contraseña son `webii_tp2`; están definidos en `docker-compose.yml`. La aplicación usa esos mismos datos en `src/main/resources/application.properties`.
+Variables de entorno (cada variable tiene el valor local de desarrollo indicado como default en `application.properties`):
 
-### PostgreSQL local
-
-Si no usás Docker, creá el rol y la base en PostgreSQL:
-
-~~~sql
-CREATE ROLE webii_tp2 WITH LOGIN PASSWORD 'webii_tp2';
-CREATE DATABASE webii_tp2 OWNER webii_tp2;
-~~~
-
-Si usás otras credenciales o puerto, actualizá las propiedades `spring.datasource.*` en `src/main/resources/application.properties`.
-
-### Iniciar la aplicación
-
-~~~powershell
-.\mvnw.cmd spring-boot:run
-~~~
-
-En macOS o Linux:
-
-~~~sh
-./mvnw spring-boot:run
-~~~
-
-Al iniciar, Flyway aplica las migraciones pendientes de `src/main/resources/db/migration/`. Hibernate valida el esquema con `spring.jpa.hibernate.ddl-auto=validate`; no lo crea ni lo modifica.
-
-Para revisar las migraciones aplicadas:
-
-~~~powershell
-docker compose exec postgres psql -U webii_tp2 -d webii_tp2 -c "SELECT version, description, success FROM flyway_schema_history ORDER BY installed_rank;"
-~~~
-
-Swagger UI está disponible en [http://localhost:8080/swagger-ui/index.html](http://localhost:8080/swagger-ui/index.html); OpenAPI JSON en `/v3/api-docs`.
-
-## Endpoints
-
-| Método | Ruta | Resultado |
+| Variable | Default | Uso |
 |---|---|---|
-| GET | `/health` | Chequeo de salud |
-| GET | `/ping` | Devuelve `pong` |
-| GET | `/api/productos?limit=&skip=` | Catálogo de solo lectura desde DummyJSON |
-| GET | `/api/productos/{id}` | Obtener un producto |
-| GET / POST | `/api/favoritos` | Listar o crear favoritos |
-| GET / PUT / DELETE | `/api/favoritos/{id}` | Obtener, actualizar o eliminar un favorito |
-| POST | `/api/listas` | Crear una lista; responde 201 |
-| GET | `/api/listas` | Listar listas |
-| GET | `/api/listas/{id}` | Obtener una lista |
-| GET | `/api/listas/{id}/favoritos` | Listar los favoritos de una lista |
-| DELETE | `/api/listas/{id}` | Eliminar una lista vacía; responde 204, o 409 si tiene favoritos |
-| POST | `/api/listas/{origenId}/mover-favoritos` | Mover los favoritos al destino y eliminar el origen; responde 204 |
+| `DB_URL` | `jdbc:postgresql://localhost:5432/webii_tp2` | URL JDBC |
+| `DB_USERNAME` | `webii_tp2` | Usuario de PostgreSQL |
+| `DB_PASSWORD` | `webii_tp2` | Contraseña de PostgreSQL |
+| `JWT_SECRET` | valor solo para desarrollo, incluido en `application.properties` | Clave HMAC de al menos 32 bytes; usar un secreto aleatorio externo en cada entorno real |
+| `JWT_DURATION_MS` | `3600000` | Vigencia del token en milisegundos |
 
-Los endpoints responden 404 cuando el recurso solicitado no existe. Crear o actualizar un favorito requiere `productoId`, `listaId` y `nota`. Crear una lista requiere `nombre`.
+```powershell
+$env:JWT_SECRET = 'reemplazar-por-un-secreto-aleatorio-de-32-bytes-o-mas'
+$env:DB_URL = 'jdbc:postgresql://localhost:5432/webii_tp2'
+.\mvnw.cmd spring-boot:run
+```
 
-## Persistencia y arquitectura: cambios respecto del TP1
+Swagger UI: [http://localhost:8080/swagger-ui/index.html](http://localhost:8080/swagger-ui/index.html). Incluye el esquema bearer JWT para probar rutas protegidas. OpenAPI JSON: `/v3/api-docs`.
 
-En el TP1, `InMemoryFavoritoRepository` implementaba el puerto `FavoritoRepository` y guardaba los favoritos en memoria. En este TP se eliminó esa implementación y se agregaron:
+## Autenticación y autorización
 
-- `FavoritoEntity`: entidad JPA que representa la tabla `favoritos`.
-- `FavoritoJpaRepository`: interfaz Spring Data JPA.
-- `FavoritoRepositoryAdapter`: convierte entre la entidad JPA y el dominio, y delega las operaciones al repositorio JPA.
+- `POST /api/auth/registro` recibe `email` y `password`, guarda BCrypt y asigna el rol `USER`; devuelve token e identidad. Email duplicado: 409.
+- `POST /api/auth/login` verifica credenciales y devuelve un JWT con el id como `sub` y el rol como claim. Credenciales inválidas: 401.
+- Enviar el token como `Authorization: Bearer <token>`. `/api/auth/**`, `/api/productos/**`, `/health`, `/ping` y Swagger son públicos. Listas y favoritos requieren token.
+- Usuarios `USER` solo acceden a sus listas y favoritos; `ADMIN` puede acceder a todos. Un recurso existente de otro usuario devuelve 403; un id inexistente devuelve 404. En actualizaciones y movimientos se verifica tanto el recurso actual/origen como el destino.
+- El registro público no permite elegir `ADMIN`. El alta de administradores es una tarea operativa: crear el usuario con un hash BCrypt seguro directamente en la tabla `usuarios`, siguiendo el proceso controlado del entorno.
 
-`FavoritoRepository` es el puerto: define el contrato que necesita el Service. El adapter es la implementación concreta de ese contrato. Durante el reemplazo de memoria por JPA, el Service y el Controller pudieron seguir usando el mismo puerto sin conocer el cambio de almacenamiento.
+| Método | Ruta | Acceso |
+|---|---|---|
+| GET | `/health`, `/ping` | Público |
+| GET | `/api/productos`, `/api/productos/{id}` | Público |
+| POST | `/api/auth/registro`, `/api/auth/login` | Público |
+| GET / POST | `/api/favoritos` | Autenticado y limitado por propietario |
+| GET / PUT / DELETE | `/api/favoritos/{id}` | Autenticado y limitado por propietario |
+| GET / POST | `/api/listas` | Autenticado y limitado por propietario |
+| GET / DELETE | `/api/listas/{id}` | Autenticado y limitado por propietario |
+| GET | `/api/listas/{id}/favoritos` | Autenticado y limitado por propietario |
+| POST | `/api/listas/{origenId}/mover-favoritos` | Autenticado; verifica origen y destino |
 
-Al agregar Listas se amplió la funcionalidad: el dominio `Favorito` y los DTOs `FavoritoRequest` y `FavoritoResponse` ahora incluyen `listaId`; el Service valida la lista y el puerto de Favoritos ofrece una consulta por lista. El Controller de Favoritos conserva sus rutas. La entidad `FavoritoEntity` tiene una relación `@ManyToOne` con `ListaEntity` mediante `lista_id`. No hay una colección `@OneToMany` inversa; los favoritos se consultan por `listaId`.
+## Modelo y migraciones
 
-Listas tiene su propio dominio, puerto, entidad, repositorio JPA, adapter, Service y Controller. Esto permite mantener las reglas de negocio en los Services y el acceso concreto a PostgreSQL detrás de los puertos.
+Usuario sigue el patrón domain, port y adapter JPA. `Lista` contiene `usuarioId`. El componente `ListaOwnership` obtiene la identidad desde Spring Security y valida la propiedad de cada recurso; los Services invocan esa regla porque conocen las operaciones de negocio y las listas implicadas. Los Controllers solo delegan. `moverFavoritos` es transaccional para mantener juntas la reasignación y la eliminación del origen.
 
-## Migraciones y evolución del esquema
+V1–V4 se mantienen sin cambios. V5 crea usuarios. V6 agrega `listas.usuario_id` como FK obligatoria. Las listas previas se asignan a `legacy-migration@invalid.local`, un usuario técnico sin credenciales utilizables. Así se preservan listas y favoritos existentes sin concedérselos a la primera persona que se registre. Este usuario tampoco tiene contraseña inicial divulgada ni endpoint de autenticación alternativo. Las cuentas normales creadas posteriormente solo reciben ownership de sus propias listas.
 
-Las migraciones están en `src/main/resources/db/migration/`:
+## CI y despliegue
 
-- `V1__create_favorito.sql`: crea `favoritos`. El nombre quedó en singular y Flyway ya la aplicó; no debe renombrarse ni editarse en una base que ya la registró.
-- `V2__create_listas.sql`: crea `listas`.
-- `V3__add_lista_id_a_favoritos.sql`: agrega la referencia nullable desde favoritos a listas.
-- `V4__lista_id_obligatorio.sql`: crea la lista `Sin clasificar` si falta, asigna allí los favoritos que tenían `lista_id` nulo y recién entonces hace obligatoria la columna.
+`.github/workflows/ci.yml` instala Java 25 y ejecuta `./mvnw verify`; el runner de GitHub Actions aporta Docker para Testcontainers. En GitHub, se puede abrir la pestaña **Actions** y seleccionar el workflow **CI**: el tilde verde indica que `verify` terminó bien; una cruz roja permite abrir el job y revisar la salida del paso `Verify (unit + integration)`. La última comprobación local ejecutada en esta rama fue `./mvnw clean verify`: pasó con 3 pruebas unitarias y 4 de integración. Todavía no existe una corrida remota ni un link de Actions porque esta rama se mantiene local.
 
-Las migraciones aplicadas se mantienen inmutables. Flyway registra su versión y checksum; cambiar un archivo ya aplicado hace que el historial deje de coincidir con su contenido. Para evolucionar el esquema se agrega una migración con una versión nueva. V4 conserva los datos existentes mediante el backfill antes de aplicar la restricción `NOT NULL`.
+### Pasos de despliegue pendientes
 
-## Operación transaccional y atomicidad
+El despliegue público no se ejecutó para respetar la instrucción de no subir ni publicar esta solución. Cuando se decida publicarla, el procedimiento previsto para un proveedor que admita Java 25 y PostgreSQL administrado es:
 
-`ListaServiceImpl.moverFavoritos` está anotado con `@Transactional`. La operación valida que existan las listas de origen y destino, reasigna los favoritos y elimina la lista de origen dentro de una única transacción.
+1. Crear una base PostgreSQL y guardar su URL JDBC, usuario y contraseña como variables protegidas del servicio.
+2. Publicar esta rama en el repositorio y crear un servicio Java conectado a ella. Usar `./mvnw clean package` como comando de build y `java -jar target/demo-0.0.1-SNAPSHOT.jar` como comando de inicio.
+3. Configurar `DB_URL`, `DB_USERNAME`, `DB_PASSWORD` y un `JWT_SECRET` aleatorio de al menos 32 bytes; `JWT_DURATION_MS` es opcional. Al iniciar, Flyway debe aplicar V1–V6 a la base remota.
+4. Revisar los logs de inicio y verificar `GET /health` en la URL pública. Luego comprobar que un endpoint protegido devuelve 401 sin token y 200 con un JWT válido.
 
-Esto aplica la atomicidad de ACID: todos los cambios se confirman juntos o se revierten juntos. Sin `@Transactional`, cada guardado podría confirmarse por separado; si una escritura posterior o el borrado de la lista fallara, algunos favoritos podrían quedar en destino mientras otros siguieran en origen y la lista fuente permaneciera.
+Estos pasos son instrucciones pendientes, no evidencia de un despliegue realizado. La URL pública, la corrida remota de CI y sus capturas quedan pendientes hasta autorizar la publicación.
